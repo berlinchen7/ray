@@ -152,11 +152,11 @@ def train(
     agent.policy.train()
     episode_durations = np.zeros((n_episodes,))
     pbar = tqdm(
-            range(n_episodes),
-            total=n_episodes,
-            desc="Starting DQN Training",
-            leave=True,
-        )
+        range(n_episodes),
+        total=n_episodes,
+        desc="Starting DQN Training",
+        leave=True,
+    )
     for episode in pbar:
         state, _ = env.reset()
         state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
@@ -178,7 +178,9 @@ def train(
             episode_durations[episode] += 1
         agent.decay_epsilon()
         if episode > n_ma:
-            pbar.set_description(f"Average Episode Duration: {np.mean(episode_durations[episode-n_ma:episode]):.3f}")
+            pbar.set_description(
+                f"Average Episode Duration: {np.mean(episode_durations[episode-n_ma:episode]):.3f}"
+            )
     return agent, episode_durations
 
 
@@ -201,7 +203,10 @@ def evaluate(
             episode_durations[episode] += 1
     return episode_durations
 
-def show_render(env: gym.Env, agent: Agent, n_episodes: int, device: torch.device) -> None:
+
+def show_render(
+    env: gym.Env, agent: Agent, n_episodes: int, device: torch.device
+) -> None:
     agent.policy.eval()
     for episode in tqdm(range(n_episodes)):
         state, _ = env.reset()
@@ -213,9 +218,10 @@ def show_render(env: gym.Env, agent: Agent, n_episodes: int, device: torch.devic
             observation, reward, terminated, truncated, _ = env.step(action.item())
             done = terminated or truncated
             state = torch.tensor(
-            observation, dtype=torch.float32, device=device
+                observation, dtype=torch.float32, device=device
             ).unsqueeze(0)
     env.close()
+
 
 def main(
     seed: int = 0,
@@ -264,7 +270,7 @@ def main(
 
     # train
     agent, train_durations = train(env, agent, n_train, device)
-    
+
     # evaluate
     test_durations = evaluate(env, agent, n_test, device)
     print(f"Average Episode Length = {test_durations.mean():.3f}")
@@ -272,6 +278,7 @@ def main(
     if render:
         env = gym.make("CartPole-v1", render_mode="human")
         show_render(env, agent, 5, device)
+
 
 if __name__ == "__main__":
     typer.run(main)

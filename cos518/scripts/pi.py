@@ -11,6 +11,7 @@ import numpy as np
 import time
 from tqdm.auto import tqdm
 
+
 @ray.remote
 class ProgressActor:
     """A Ray actor that tracks and reports the progress of sampling tasks.
@@ -19,6 +20,7 @@ class ProgressActor:
         total_num_samples (int): Total number of samples across all tasks.
         num_samples_completed_per_task (dict): Mapping of task IDs to number of completed samples.
     """
+
     def __init__(self, total_num_samples: int) -> None:
         self.total_num_samples = total_num_samples
         self.num_samples_completed_per_task = {}
@@ -41,6 +43,7 @@ class ProgressActor:
         return (
             sum(self.num_samples_completed_per_task.values()) / self.total_num_samples
         )
+
 
 @ray.remote
 def sampling_task(
@@ -67,6 +70,7 @@ def sampling_task(
 
     progress_actor.report_progress.remote(task_id, num_samples)
     return num_inside
+
 
 def main(
     seed: int = 0, num_sampling_tasks: int = 1, num_samples_per_task: int = 10000000
@@ -106,6 +110,6 @@ def main(
     print(f"Estimated value of π is: {pi}")
     print(f"Script completion time: {time.time() - start:.4f} s")
 
+
 if __name__ == "__main__":
     typer.run(main)
-
