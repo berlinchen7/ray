@@ -11,6 +11,8 @@ import numpy as np
 import time
 from tqdm.auto import tqdm
 
+import matplotlib.pyplot as plt
+
 
 @ray.remote
 class ProgressActor:
@@ -24,8 +26,11 @@ class ProgressActor:
     def __init__(self, total_num_samples: int) -> None:
         self.total_num_samples = total_num_samples
         self.num_samples_completed_per_task = {}
+        self.total_num_inside_per_task = {}
 
-    def report_progress(self, task_id: int, num_samples_completed: int) -> None:
+    def report_progress(
+        self, task_id: int, num_samples_completed: int, num_inside: int
+    ) -> None:
         """Updates the number of samples completed for a specific task.
 
         Args:
@@ -33,6 +38,7 @@ class ProgressActor:
             num_samples_completed (int): The number of samples completed by the task.
         """
         self.num_samples_completed_per_task[task_id] = num_samples_completed
+        self.total_num_inside_per_task[task_id] = num_inside
 
     def get_progress(self) -> float:
         """Calculates the total progress as the fraction of total samples completed.
@@ -43,6 +49,11 @@ class ProgressActor:
         return (
             sum(self.num_samples_completed_per_task.values()) / self.total_num_samples
         )
+
+    def get_results(self) -> float:
+        return (sum(self.total_num_inside_per_task.values()) * 4) / (sum(
+            self.num_samples_completed_per_task.values()
+        ) + 1e-10)
 
 
 @ray.remote
@@ -66,14 +77,30 @@ def sampling_task(
             num_inside += 1
 
         if (i + 1) % 100000 == 0:
-            progress_actor.report_progress.remote(task_id, i + 1)
+            progress_actor.report_progress.remote(task_id, i + 1, num_inside)
 
-    progress_actor.report_progress.remote(task_id, num_samples)
+    progress_actor.report_progress.remote(task_id, num_samples, num_inside)
     return num_inside
+
+def plot_results(times, estimates, title="Estimate of Pi as a Function of Runtime"):
+    plt.figure(figsize=(10, 5))
+    plt.plot(times, estimates, label="Estimated π")
+    plt.axhline(y=np.pi, color='r', linestyle='--', label="Actual π")
+    plt.ylim(3.135, 3.15)
+    plt.title(title)
+    plt.xlabel("Runtime (s)")
+    plt.ylabel("Estimate of Pi")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 
 def main(
-    seed: int = 0, num_sampling_tasks: int = 1, num_samples_per_task: int = 10000000
+    seed: int = 0,
+    num_sampling_tasks: int = 1,
+    num_samples_per_task: int = 10000000,
+    scheduling_strategy: str = "DEFAULT",
+    plot: bool = False
 ):
     """Main function to run the Monte Carlo π estimation.
 
@@ -82,18 +109,19 @@ def main(
         num_sampling_tasks (int): The number of parallel sampling tasks to run.
         num_samples_per_task (int): The number of samples per task.
     """
-    ray.init()
-    start = time.time()
+    context = ray.init()
     np.random.seed(seed)
 
     total_num_samples = num_sampling_tasks * num_samples_per_task
-    progress_actor = ProgressActor.remote(total_num_samples)
+    progress_actor = ProgressActor.options(
+        scheduling_strategy=scheduling_strategy
+    ).remote(total_num_samples)
+    for i in range(num_sampling_tasks):
+        sampling_task.options(scheduling_strategy=scheduling_strategy).remote(num_samples_per_task, i, progress_actor)
 
-    results = [
-        sampling_task.remote(num_samples_per_task, i, progress_actor)
-        for i in range(num_sampling_tasks)
-    ]
-
+    pi_estimates = []
+    times = []
+    start = time.time()
     with tqdm(total=100, desc="Calculating Pi") as pbar:
         current_progress = 0
         while True:
@@ -101,15 +129,19 @@ def main(
             update = int(progress * 100) - current_progress
             pbar.update(update)
             current_progress = int(progress * 100)
+            pi = ray.get(progress_actor.get_results.remote())
+            pi_estimates.append(pi)
+            times.append(time.time() - start)
             if progress >= 1:
                 break
-            time.sleep(1)
+            time.sleep(0.5)
 
-    total_num_inside = sum(ray.get(results))
-    pi = (total_num_inside * 4) / total_num_samples
+    pi = ray.get(progress_actor.get_results.remote())
     print(f"Estimated value of π is: {pi}")
     print(f"Script completion time: {time.time() - start:.4f} s")
 
+    if plot:
+        plot_results(times, pi_estimates)
 
 if __name__ == "__main__":
     typer.run(main)
