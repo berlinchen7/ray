@@ -1,6 +1,6 @@
 """
 Script adapted from: https://docs.ray.io/en/latest/ray-core/examples/plot_pong_example.html
-Modifier: Gianluca Bencomo
+Modifier: Gianluca Bencomo, Berlin Chen
 Purpose: Simple RL setting for analyzing benefits of Ray Core.
 Optimizes simple MLP to play Atari Pong.
 """
@@ -122,6 +122,9 @@ class RolloutWorker(object):
         # Modulate the gradient with advantage (the policy gradient magic
         # happens right here).
         epdlogp *= discounted_epr
+
+        # time.sleep(5)
+
         return model.backward(eph, epx, epdlogp), reward_sum
 
 
@@ -132,12 +135,20 @@ def main(
     alpha: float = 1e-4,
     decay: float = 0.99,
     iterations: int = 500,
-    batch_size: int = 8,
+    batch_size: int = 20,#8,
 ):
-    ray.init()
+    
+    # Make sure to run the following to initialize the ray cluster:
+    # ray start --head --resources '{"node": 0}'  --num-cpus=2 --num-gpus=0
+    # ray start  --resources '{"node": 1}' --num-cpus=2 --num-gpus=0 --address localhost:6379
+    # see the following:
+    #    https://rise.cs.berkeley.edu/blog/ray-scheduling/
+    #    https://docs.ray.io/en/latest/ray-core/scheduling/resources.html
+
+    ray.init(address='localhost:6379')
 
     model = Model(H=hidden)
-    actors = [RolloutWorker.remote() for _ in range(batch_size)]
+    actors = [RolloutWorker.options(scheduling_strategy="DEFAULT", ).remote() for _ in range(batch_size)]
 
     running_reward = None
     grad_buffer = {k: np.zeros_like(v) for k, v in model.weights.items()}
