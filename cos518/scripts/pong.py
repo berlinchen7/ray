@@ -98,7 +98,7 @@ def zero_grads(grad_buffer):
         grad_buffer[k] = np.zeros_like(v)
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class RolloutWorker(object):
     def __init__(self):
         self.env = gym.make("ALE/Pong-v5")
@@ -124,6 +124,9 @@ class RolloutWorker(object):
         epdlogp *= discounted_epr
 
         # time.sleep(5)
+        # dim = 600
+        # a = np.random.rand(dim, dim)
+        # b = np.linalg.inv(a)
 
         return model.backward(eph, epx, epdlogp), reward_sum
 
@@ -135,7 +138,7 @@ def main(
     alpha: float = 1e-4,
     decay: float = 0.99,
     iterations: int = 500,
-    batch_size: int = 20,#8,
+    batch_size: int = 8,
 ):
     
     # Make sure to run the following to initialize the ray cluster:
@@ -145,7 +148,11 @@ def main(
     #    https://rise.cs.berkeley.edu/blog/ray-scheduling/
     #    https://docs.ray.io/en/latest/ray-core/scheduling/resources.html
 
-    ray.init(address='localhost:6379')
+    # Note: has to be 0.0.0.0.
+    # See: https://github.com/grpc/grpc/issues/9789#issuecomment-281431679
+    context = ray.init(address='0.0.0.0:6379')
+
+    print(f"dashboard url is {context.dashboard_url}")
 
     model = Model(H=hidden)
     actors = [RolloutWorker.options(scheduling_strategy="DEFAULT", ).remote() for _ in range(batch_size)]
