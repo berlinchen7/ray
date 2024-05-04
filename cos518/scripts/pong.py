@@ -13,7 +13,7 @@ import time
 import numpy as np
 import gymnasium as gym
 
-# Forces OpenMP to use 1 single thread to prevent contention between multiple actors. 
+# Forces OpenMP to use 1 single thread to prevent contention between multiple actors.
 os.environ["OMP_NUM_THREADS"] = "1"
 # Tells numpy to only use one core.
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -147,7 +147,9 @@ def main(
         model_id = ray.put(model)
         gradient_ids = []
         start_time = time.time()
-        gradient_ids = [actor.compute_gradient.remote(model_id, gamma) for actor in actors]
+        gradient_ids = [
+            actor.compute_gradient.remote(model_id, gamma) for actor in actors
+        ]
         for batch in range(batch_size):
             [grad_id], gradient_ids = ray.wait(gradient_ids)
             grad, reward_sum = ray.get(grad_id)

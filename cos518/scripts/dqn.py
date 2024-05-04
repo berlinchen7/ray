@@ -147,7 +147,12 @@ class Agent:
 
 
 def train(
-    env: gym.Env, agent: Agent, n_episodes: int, device: torch.device, n_ma: int = 10
+    env: gym.Env,
+    agent: Agent,
+    n_episodes: int,
+    device: torch.device,
+    n_ma: int = 10,
+    seed: int = 0,
 ) -> tuple[Agent, np.array]:
     agent.policy.train()
     episode_durations = np.zeros((n_episodes,))
@@ -158,7 +163,8 @@ def train(
         leave=True,
     )
     for episode in pbar:
-        state, _ = env.reset()
+        state, _ = env.reset(seed=seed + episode)
+        env.action_space.seed(seed + episode)
         state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
         done = False
         while not done:
@@ -178,19 +184,18 @@ def train(
             episode_durations[episode] += 1
         agent.decay_epsilon()
         if episode > n_ma:
-            pbar.set_description(
-                f"Average Episode Duration: {np.mean(episode_durations[episode-n_ma:episode]):.3f}"
-            )
+            avg = np.mean(episode_durations[episode - n_ma : episode])
+            pbar.set_description(f"Average Episode Duration: {avg:.3f}")
     return agent, episode_durations
 
 
 def evaluate(
-    env: gym.Env, agent: Agent, n_episodes: int, device: torch.device
+    env: gym.Env, agent: Agent, n_episodes: int, device: torch.device, seed: int = 31415
 ) -> np.array:
     agent.policy.eval()
     episode_durations = np.zeros((n_episodes,))
     for episode in tqdm(range(n_episodes)):
-        state, _ = env.reset()
+        state, _ = env.reset(seed=seed + episode)
         state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
         done = False
         while not done:
@@ -238,7 +243,14 @@ def main(
     plot: bool = False,
     render: bool = False,
 ) -> None:
+    # set random seeds
     np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
     # select device
     device = torch.device(
         "cuda:0"
@@ -251,8 +263,9 @@ def main(
     # set up environment
     env = gym.make("CartPole-v1")
 
+    # get n_actions + n_observations
     n_actions = env.action_space.n
-    state, info = env.reset()
+    state, _ = env.reset()
     n_observations = len(state)
 
     agent = Agent(
@@ -269,10 +282,10 @@ def main(
     )
 
     # train
-    agent, train_durations = train(env, agent, n_train, device)
+    agent, train_durations = train(env, agent, n_train, device, seed=seed)
 
     # evaluate
-    test_durations = evaluate(env, agent, n_test, device)
+    test_durations = evaluate(env, agent, n_test, device, seed=seed)
     print(f"Average Episode Length = {test_durations.mean():.3f}")
 
     if render:
