@@ -1,14 +1,36 @@
 """
 Script adapted from: https://docs.ray.io/en/latest/ray-core/examples/plot_pong_example.html
-Modifier: Gianluca Bencomo
+Modifier: Gianluca Bencomo, Berlin Chen
 Purpose: Simple RL setting for analyzing benefits of Ray Core.
 Optimizes simple MLP to play Atari Pong.
 """
+
+# SET EXP CONFIGS BELOW:
+import datetime
+import time
+curr_timestr = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d-%H-%M-%S')
+SAVE_X_ROLLOUTS = 50
+SKIP_FIRST_X_ROLLOUTS = 1
+EXP_DIRECTORY = f'/scratch/bc2188/ray/cos518/results/{curr_timestr}/'
+EXP_CONFIG = {
+    'batch_size': 8,
+    'hidden': 1000,
+    'scheduling_strategy': 'DEFAULT',
+    'required_num_cpus': 1,
+    'cpu_head': 0,
+    'gpu_head': 0,
+    'cpu_worker': [8, 8, 8, 8, 8, 8, 8, 8],
+    'gpu_worker': [0, 0, 0, 0, 0, 0, 0, 0],
+}
+
+
 
 import os
 import typer
 import ray
 import time
+import json
+import pickle as pk
 
 import numpy as np
 import gymnasium as gym
@@ -98,7 +120,7 @@ def zero_grads(grad_buffer):
         grad_buffer[k] = np.zeros_like(v)
 
 
-@ray.remote
+@ray.remote(num_cpus=EXP_CONFIG['required_num_cpus'])
 class RolloutWorker(object):
     def __init__(self):
         self.env = gym.make("ALE/Pong-v5")
@@ -122,28 +144,57 @@ class RolloutWorker(object):
         # Modulate the gradient with advantage (the policy gradient magic
         # happens right here).
         epdlogp *= discounted_epr
+
+        # time.sleep(5)
+        # dim = 600
+        # a = np.random.rand(dim, dim)
+        # b = np.linalg.inv(a)
+
         return model.backward(eph, epx, epdlogp), reward_sum
+
 
 
 def main(
     seed: int = 0,
-    hidden: int = 200,
+    hidden: int = EXP_CONFIG["hidden"],#200,
     gamma: float = 0.99,
     alpha: float = 1e-4,
     decay: float = 0.99,
-    iterations: int = 500,
-    batch_size: int = 8,
+    iterations: int = SKIP_FIRST_X_ROLLOUTS + SAVE_X_ROLLOUTS,#500,
+    batch_size: int = EXP_CONFIG["batch_size"], #8,
 ):
-    ray.init()
+    
+
+    os.makedirs(EXP_DIRECTORY, exist_ok=True)
+    config_filepath = os.path.join(EXP_DIRECTORY, 'config.json')
+    with open(config_filepath, 'w', encoding='utf-8') as f:
+        json.dump(EXP_CONFIG, f, ensure_ascii=False, indent=4)
+
+
+    # Make sure to run the following to initialize the ray cluster:
+    # ray start --head --resources '{"node": 0}'  --num-cpus=2 --num-gpus=0
+    # ray start  --resources '{"node": 1}' --num-cpus=2 --num-gpus=0 --address localhost:6379
+    # see the following:
+    #    https://rise.cs.berkeley.edu/blog/ray-scheduling/
+    #    https://docs.ray.io/en/latest/ray-core/scheduling/resources.html
+
+    # Note: has to be 0.0.0.0.
+    # See: https://github.com/grpc/grpc/issues/9789#issuecomment-281431679
+    context = ray.init()#address='0.0.0.0:6379')
+
+    # print(f"dashboard url is {context.dashboard_url}")
 
     model = Model(H=hidden)
-    actors = [RolloutWorker.remote() for _ in range(batch_size)]
+    actors = [RolloutWorker.options(scheduling_strategy=EXP_CONFIG['scheduling_strategy'],).remote() for _ in range(batch_size)]
 
     running_reward = None
     grad_buffer = {k: np.zeros_like(v) for k, v in model.weights.items()}
     rmsprop_cache = {k: np.zeros_like(v) for k, v in model.weights.items()}
 
-    for i in range(1, 1 + iterations):
+
+    res = []
+
+    for i in range(iterations):
         model_id = ray.put(model)
         gradient_ids = []
         start_time = time.time()
@@ -161,15 +212,24 @@ def main(
                 else running_reward * 0.99 + reward_sum * 0.01
             )
         end_time = time.time()
+        latency = end_time - start_time
         print(
             "Batch {} computed {} rollouts in {} seconds, "
             "running mean is {}".format(
-                i, batch_size, end_time - start_time, running_reward
+                i, batch_size, latency, running_reward
             )
         )
+
+        if i >= SKIP_FIRST_X_ROLLOUTS:
+            res.append((i, latency))
+
         model.update(grad_buffer, rmsprop_cache, alpha, decay)
         zero_grads(grad_buffer)
+    
 
+    res_filepath = os.path.join(EXP_DIRECTORY, 'result.p')
+    with open(res_filepath, 'wb') as fp:
+        pk.dump(res, fp)
 
 if __name__ == "__main__":
     typer.run(main)
